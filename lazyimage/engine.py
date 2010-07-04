@@ -1,3 +1,8 @@
+from .structures import Closure, Symbol, Expr, default_closure
+from .exprgraph import clone, ExprGraph
+from .transform import TransformPolicy
+
+class MissingValue(Exception):pass
 
 class VirtualMachine(object):
     def __init__(self, inputs, outputs, closure, expr_graph, updates, return_outputs0):
@@ -8,8 +13,12 @@ class VirtualMachine(object):
         self.return_outputs0 = return_outputs0
         self.expr_graph = expr_graph
 
+    def printprog(self):
+        for i,impl in enumerate(self.expr_graph.expr_iter()):
+            print i,impl
+
     def __call__(self, *args):
-        results = dict(self.closure)
+        results = dict(self.closure.store)
         for a, s in zip(args, self.inputs):
             results[s] = a
         def rec_eval(s):
@@ -17,12 +26,12 @@ class VirtualMachine(object):
                 return results[s]
             except KeyError:
                 pass
-            if isinstance(s, Symbol) and s.expr:
-                #TODO: support multi-output Impls
-                vargs = [rec_eval(i) for i in s.expr.inputs]
-                rval = results[s] = s.expr.impl(*vargs)
-                return rval
-            return s
+            if not s.expr:
+                raise MissingValue(s)
+            #TODO: support multi-output Impls
+            vargs = [rec_eval(i) for i in s.expr.inputs]
+            rval = results[s] = s.expr.impl(*vargs)
+            return rval
         for s in self.outputs:
             rec_eval(s)
         #TODO: support multiple outputs
@@ -42,7 +51,7 @@ def function_driver(inputs, outputs, closure, givens, updates,
         #TODO: translate the updates into the cloned graph
         raise NotImplementedError('updates arg is not implemented yet')
 
-    arg_symbols = [Symbol() for i in inputs]
+    arg_symbols = [i.clone() for i in inputs]
     lookup_tbl = dict(zip(inputs, arg_symbols))
     output_symbols = [clone(o, lookup_tbl) for o in outputs]
 
@@ -50,14 +59,12 @@ def function_driver(inputs, outputs, closure, givens, updates,
     TP(expr_graph)
     return VM(inputs, outputs, closure, expr_graph, updates, return_outputs0)
 
-def function(inputs, outputs, closure=None, givens=None, updates=None,
+def function(inputs, outputs, closure=default_closure, givens=None, updates=None,
         VM=None, TP=None):
-    if closure is None:
-        closure = Closure()
     if VM is None:
         VM = VirtualMachine
     if TP is None:
-        TP = lambda expr_graph: expr_graph
+        TP = TransformPolicy.new()
 
     if isinstance(outputs, Symbol):
         outputs = [outputs]
@@ -68,17 +75,14 @@ def function(inputs, outputs, closure=None, givens=None, updates=None,
     return function_driver(inputs, outputs, closure, givens, updates, VM, TP,
             return_outputs0=return_outputs0)
 
-
-# The default closure is a database of values to use for symbols
-# that are not given as function arguments.
-# The default closure is used by the compute() function to 
-# support lazy evaluation.
-
-_default_closure = Closure()
 def symbol(*args, **kwargs):
-    return _default_closure.symbol(*args, **kwargs)
+    return default_closure.symbol(*args, **kwargs)
+def set_value(s, v, closure=default_closure):
+    closure.set_value(s, v)
+def get_value(s, closure=default_closure):
+    closure.get_value(s)
 
-def compute(outputs, closure=_default_closure, givens=None, VM=None, TP=None):
+def compute(outputs, closure=default_closure, givens=None, VM=None, TP=None):
     return function(
             inputs=[], 
             outputs=outputs,

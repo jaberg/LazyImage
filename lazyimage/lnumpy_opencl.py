@@ -1,18 +1,38 @@
 
 import numpy
-from .structures import Symbol, compute, Impl
+from .structures import Symbol, Impl
+from . import lnumpy, transform
 
 import pyopencl as cl
+
+
+#
+# TODO: How to handle contexts?   Some ideas:
+#  - global
+#  - attached to closures (including _default_closure)
+#  - attached to Symbols or Expr
+#
 
 _cpu_context = cl.Context(dev_type=cl.device_type.CPU)
 _cpu_queue   = cl.CommandQueue(_cpu_context)
 
+
+def register_transform(priority, tags=None):
+    if tags is None:
+        tags = set()
+    tags.add('lnumpy_opencl')
+    tags.add('default')
+    return transform.register_transform(priority,tags)
+
 class UnaryElemwiseCpu(Impl):
-    def __init__(self, fallback_f, code_fragment, cache_limit=None):
+    def __init__(self, fallback_f, code_fragment, name):
         self.fallback_f = fallback_f
         self.code_fragment = code_fragment
-        self.cache_limit = cache_limit
+        self.name=name
         self.cache = {}
+
+    def __str__(self):
+        return 'OpenCL_CPU_%s'%self.name
 
     def _spec_from_arg(self, arg):
         #TODO: return argument memory alignment
@@ -71,7 +91,20 @@ class UnaryElemwiseCpu(Impl):
 
 def impl_from_fnname(fnname):
     return UnaryElemwiseCpu(getattr(numpy,fnname),
-            lambda inputs, outputs: '%s = %s(%s);'%(outputs[0],fnname,inputs[0]),)
+            lambda inputs, outputs: '%s = %s(%s);'%(outputs[0],fnname,inputs[0]),
+            fnname)
+
+
+@register_transform(priority=1 )
+def replace_numpy_with_opencl(expr_graph):
+    for expr in expr_graph.expr_iter():
+        if isinstance(expr.impl, lnumpy.NumpyElemwise)\
+                and expr.n_inputs==1:
+            try:
+                cl_impl = impl_from_fnname(expr.impl.name)
+            except NotImplementedError:
+                continue
+            expr_graph.replace_impl(expr, cl_impl)
 
 
 if 0:

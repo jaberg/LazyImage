@@ -2,16 +2,10 @@
 A numpy-like module with support for lazy evaluation
 """
 import numpy
-from .structures import Symbol, compute, Impl
+from .structures import Symbol, Impl
+from .engine import compute
 
 class NdarraySymbol(Symbol):
-    def __init__(self, expr=None, value=None, type=None):
-        if expr:
-            assert value is None
-        self.value = value
-        self.expr = expr
-        self.type = type
-
     def __array__(self):
         return numpy.asarray(compute(self))
 

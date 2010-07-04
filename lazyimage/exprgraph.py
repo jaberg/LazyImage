@@ -1,6 +1,9 @@
 """
 Sorting and traversing of expression graphs.
 """
+from collections import deque
+
+from .structures import Expr, Symbol
 
 # Symbol can have multiple exprs during optimization
 class ExprGraph(object):
@@ -21,7 +24,7 @@ class ExprGraph(object):
         Raises an exception if you try to continue iterating after
         modifying the expression graph.
         """
-        exprs = graph_algo.exprs(self.inputs, self.outputs)
+        exprs = io_expr_list(self.inputs, self.outputs)
         self._iterating = True
         for e in exprs:
             if self._modified_since_iterating:
@@ -39,9 +42,8 @@ class ExprGraph(object):
 
     def replace_impl(self, symbol, new_impl):
         # call pre-hooks
-        symbol.impl = impl
+        symbol.impl = new_impl
         # call post-hooks
-
 
 def stack_search(start, expand, mode='bfs', build_inv = False):
     """Search through a graph, either breadth- or depth-first
@@ -52,7 +54,7 @@ def stack_search(start, expand, mode='bfs', build_inv = False):
     :param expand: 
         when we get to a node, add expand(node) to the list of nodes to visit.  This function
         should return a list, or None
-    :rtype: list of `Variable` or `Apply` instances (depends on `expend`)
+    :rtype: list of `Symbol` or `Expr` instances (depends on `expend`)
     :return: the list of nodes in order of traversal.
     
     :note:
@@ -88,12 +90,12 @@ def stack_search(start, expand, mode='bfs', build_inv = False):
     return rval_list
 
 def inputs(variable_list, blockers = None):
-    """Return the inputs required to compute the given Variables.
+    """Return the inputs required to compute the given Symbol.
 
-    :type variable_list: list of `Variable` instances
+    :type variable_list: list of `Symbol` instances
     :param variable_list:
-        output `Variable` instances from which to search backward through expr
-    :rtype: list of `Variable` instances
+        output `Symbol` instances from which to search backward through expr
+    :rtype: list of `Symbol` instances
     :returns: 
         input nodes with no expr, in the order found by a left-recursive depth-first search
         started at the nodes in `variable_list`.
@@ -109,7 +111,7 @@ def inputs(variable_list, blockers = None):
     #print rval, _orig_inputs(o)
     return rval
 
-def variables_and_orphans(i, o):
+def io_variables_and_orphans(i, o):
     """WRITEME
     """
     def expand(r):
@@ -121,37 +123,37 @@ def variables_and_orphans(i, o):
     orphans = [r for r in variables if r.expr is None and r not in i]
     return variables, orphans
 
-def exprs(i, o):
+def io_expr_list(i, o):
     """ WRITEME
 
     :type i: list
-    :param i: input L{Variable}s
+    :param i: input L{Symbol}s
     :type o: list
-    :param o: output L{Variable}s
+    :param o: output L{Symbol}s
 
     :returns:
         the set of ops that are contained within the subgraph that lies between i and o,
-        including the expr of the L{Variable}s in o and intermediary ops between i and o, but
-        not the expr of the L{Variable}s in i.
+        including the expr of the L{Symbol}s in o and intermediary ops between i and o, but
+        not the expr of the L{Symbol}s in i.
     """
-    rval = set()
-    variables, orphans = variables_and_orphans(i, o)
+    rval = []
+    variables, orphans = io_variables_and_orphans(i, o)
     for r in variables:
         if r not in i and r not in orphans:
             if r.expr is not None:
-                ops.add(r.expr)
+                rval.append(r.expr)
     return rval
 
 def variables(i, o):
     """ WRITEME
 
     :type i: list
-    :param i: input L{Variable}s
+    :param i: input L{Symbol}s
     :type o: list
-    :param o: output L{Variable}s
+    :param o: output L{Symbol}s
 
     :returns:
-        the set of Variables that are involved in the subgraph that lies between i and o. This
+        the set of Symbol that are involved in the subgraph that lies between i and o. This
         includes i, o, orphans(i, o) and all values of all intermediary steps from i to o.
     """
     return variables_and_orphans(i, o)[0]
@@ -160,25 +162,25 @@ def orphans(i, o):
     """ WRITEME
 
     :type i: list
-    :param i: input L{Variable}s
+    :param i: input L{Symbol}s
     :type o: list
-    :param o: output L{Variable}s
+    :param o: output L{Symbol}s
 
     :returns:
-        the set of Variables which one or more Variables in o depend on but are neither in i nor in
+        the set of Symbol which one or more Symbol in o depend on but are neither in i nor in
         the subgraph that lies between i and o.
 
     e.g. orphans([x], [(x+y).out]) => [y]
     """
     return variables_and_orphans(i, o)[1]
 
-def clone(i, o, copy_inputs = True):
+def old_clone(i, o, copy_inputs = True):
     """ WRITEME
 
     :type i: list
-    :param i: input L{Variable}s
+    :param i: input L{Symbol}s
     :type o: list
-    :param o: output L{Variable}s
+    :param o: output L{Symbol}s
     :type copy_inputs: bool
     :param copy_inputs: if True, the inputs will be copied (defaults to False)
 
@@ -188,13 +190,26 @@ def clone(i, o, copy_inputs = True):
     equiv = clone_get_equiv(i, o, copy_inputs)
     return [equiv[input] for input in i], [equiv[output] for output in o]
 
+def clone(s, dct):
+    """Copy an expression graph"""
+    if s in dct:
+        return dct[s]
+    if getattr(s, 'expr', None):
+        input_copies=[clone(i_s, dct) for i_s in s.expr.inputs]
+        rval = s.expr.impl(*input_copies)
+        dct[s] = rval
+        return rval
+    return s
+
+
+
 def clone_get_equiv(i, o, copy_inputs_and_orphans = True):
     """ WRITEME
 
     :type i: list
-    :param i: input L{Variable}s
+    :param i: input L{Symbol}s
     :type o: list
-    :param o: output L{Variable}s
+    :param o: output L{Symbol}s
     :type copy_inputs_and_orphans: bool
     :param copy_inputs_and_orphans: 
         if True, the inputs and the orphans will be replaced in the cloned graph by copies
@@ -203,7 +218,7 @@ def clone_get_equiv(i, o, copy_inputs_and_orphans = True):
 
     :rtype: a dictionary
     :return:
-        equiv mapping each L{Variable} and L{Op} in the graph delimited by i and o to a copy
+        equiv mapping each L{Symbol} and L{Op} in the graph delimited by i and o to a copy
         (akin to deepcopy's memo).
     """
 
@@ -295,10 +310,10 @@ def io_toposort(i, o, orderings = {}):
     def deps(obj): 
         rval = []
         if obj not in iset:
-            if isinstance(obj, Variable): 
+            if isinstance(obj, Symbol): 
                 if obj.expr:
                     rval = [obj.expr]
-            if isinstance(obj, Apply):
+            if isinstance(obj, Expr):
                 rval = list(obj.inputs)
             rval.extend(orderings.get(obj, []))
         else:

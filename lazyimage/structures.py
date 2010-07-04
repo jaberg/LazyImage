@@ -1,27 +1,93 @@
+"""
+Data structures to support lazy-evaluation decorators.
 
-# Symbol can have multiple exprs during optimization
-# Types would ideally be handled as sets
+"""
+
+class Metadata(object):
+    """
+    Properties of data.
+    A Metadata instances can be attached to a Symbol, and Impls can modify the metadata of
+    their outputs to communicate with other Impls and graph-transformation code.
+
+    """
+    def __init__(self):
+        pass
+    def is_conformant(self, obj):
+        """
+        Return True iff object is consistent with this Metadata.
+
+        This function can be used in self-verifying execution modes,
+        to ensure that Impls return the sort of objects they promised to return.
+        """
+        return True
+    def make_conformant(self, obj):
+        """
+        Return an object that is equal to obj, but conformant to this metadata.
+
+        This may involve casting integers to floating-point numbers, 
+        padding with broadcastable dimensions, changing string encodings, etc.
+        """
+        return obj
+    def disjoint_from(self, other):
+        """
+        Return True iff no data could be conformant to self and other.
+
+        This function is useful for detecting errors in
+        """
+        return False
 
 class Symbol(object):
     """A data node in an expression graph.
     """
-    def __init__(self, expr=None, type=None, name=None):
+    Metadata = Metadata
+    @classmethod
+    def blank(cls, name=None):
+        return cls(expr=None, meta=cls.Metadata(), name=name)
+    def __init__(self, expr, meta, name):
         self.expr = expr
-        self.type = type
+        self.meta = meta
         self.name = name
 
-class Expr(object):
-    """An implementation node in a expression graph.  """
-    def __init__(self, impl, inputs, outputs):
-        self.impl = impl
-        self.inputs = inputs
-        self.outputs = outputs
+    def clone(self):
+        return self.__class__(expr=None, meta=self.meta, name=self.name)
 
-class Closure(dict):
-    def symbol(self, value, ctor=Symbol, *args, **kwargs):
+class Closure(object):
+    """A closure encapsulates data that is available for lazy evaluation
+
+    A Closure subclass implements the policy for where data should be stored,
+    and whether it should be copied to a private area.
+    """
+    # This is like the shared constructor
+    def __init__(self):
+        self.store = {}
+    def symbol(self, value, ctor=Symbol.blank, *args, **kwargs):
         rval = ctor(*args,**kwargs)
-        self[rval] = value
+        self.store[rval] = value
         return rval
+
+    def constant(self, value):
+        #TODO: Mark this symbol's meta-data as being constant
+        return self.symbol(value)
+
+    def as_input(self, obj):
+        if isinstance(obj, Symbol):
+            return obj
+        return self.constant(obj)
+
+    def get_value(self, s):
+        return self.store[s]
+    def init_value(self, s, v):
+        self.store[s] = v
+    def set_value(self, s, v):
+        if s not in self.store:
+            raise KeyError(s)
+        self.store[s] = s.meta.make_conformant(v)
+
+# The default closure is a database of values to use for symbols
+# that are not given as function arguments.
+# The default closure is used by the compute() function to 
+# support lazy evaluation.
+default_closure = Closure()
 
 class Impl(object):
     """
@@ -35,13 +101,17 @@ class Impl(object):
             return Impl(fn=fn,*args, **kwargs)
         return deco
 
-    def __init__(self, fn, n_outputs=1, name=None):
+    def __init__(self, fn, n_outputs=1, name=None, closure=default_closure):
         self.n_outputs=n_outputs
         self.fn = fn
         self.name = name
+        self.closure = closure
 
-    def Expr(self, args):
-        return Expr(self, args, None)
+    def Expr(self, args, outputs):
+        rval = Expr(self, args, outputs)
+        for o in rval.outputs:
+            o.expr = rval
+        return rval
 
     def _args_has_symbol(self, args):
         for a in args:
@@ -51,112 +121,29 @@ class Impl(object):
 
     def __call__(self, *args):
         if self._args_has_symbol(args):
-            expr = self.Expr(args)
+            inputs = [self.closure.as_input(a) for a in args]
+            outputs = [Symbol.blank() for o in range(self.n_outputs)]
+            expr = self.Expr(inputs, outputs)
             if self.n_outputs>1:
-                return [Symbol(expr=expr) for o in self.outputs]
+                return outputs
             else:
-                return Symbol(expr=expr)
+                return outputs[0]
         else:
             return self.fn(*args)
 
-class ExprGraph(object):
-    def __init__(self, inputs, outputs):
-        self.inputs = inputs
-        self.outputs = outputs
-
-class TransformPolicy(object):
-    def __call__(self, expr_graph):
-        pass
-
-class VirtualMachine(object):
-    def __init__(self, inputs, outputs, closure, expr_graph, updates, return_outputs0):
-        self.inputs = inputs
-        self.outputs = outputs
-        self.closure = closure
-        self.updates = updates
-        self.return_outputs0 = return_outputs0
-        self.expr_graph = expr_graph
-
-    def __call__(self, *args):
-        results = dict(self.closure)
-        for a, s in zip(args, self.inputs):
-            results[s] = a
-        def rec_eval(s):
-            try:
-                return results[s]
-            except KeyError:
-                pass
-            if isinstance(s, Symbol) and s.expr:
-                #TODO: support multi-output Impls
-                vargs = [rec_eval(i) for i in s.expr.inputs]
-                rval = results[s] = s.expr.impl(*vargs)
-                return rval
-            return s
-        for s in self.outputs:
-            rec_eval(s)
-        #TODO: support multiple outputs
-        if self.return_outputs0:
-            return [results[o] for o in self.outputs]
-        else:
-            return results[self.outputs[0]]
-
-def function_driver(inputs, outputs, closure, givens, updates, 
-        VM, TP, return_outputs0):
-
-    if givens:
-        #TODO: use the givens to modify the clone operation
-        raise NotImplementedError('givens arg is not implemented yet')
-
-    if updates:
-        #TODO: translate the updates into the cloned graph
-        raise NotImplementedError('updates arg is not implemented yet')
-
-    arg_symbols = [Symbol() for i in inputs]
-    lookup_tbl = dict(zip(inputs, arg_symbols))
-    output_symbols = [clone(o, lookup_tbl) for o in outputs]
-
-    expr_graph = ExprGraph(arg_symbols, output_symbols)
-    TP(expr_graph)
-    return VM(inputs, outputs, closure, expr_graph, updates, return_outputs0)
-
-def function(inputs, outputs, closure=None, givens=None, updates=None,
-        VM=None, TP=None):
-    if closure is None:
-        closure = Closure()
-    if VM is None:
-        VM = VirtualMachine
-    if TP is None:
-        TP = lambda expr_graph: expr_graph
-
-    if isinstance(outputs, Symbol):
-        outputs = [outputs]
-        return_outputs0 = True
-    else:
-        return_outputs0 = False
-
-    return function_driver(inputs, outputs, closure, givens, updates, VM, TP,
-            return_outputs0=return_outputs0)
-
-def compute(outputs, closure=None, givens=None, VM=None, TP=None):
-    return function(
-            inputs=[], 
-            outputs=outputs,
-            closure=closure,
-            updates=None,
-            givens=None,
-            VM=VM,
-            TP=TP)()
-
-def clone(s, dct):
-    """Copy an expression graph"""
-    if s in dct:
-        return dct[s]
-    if getattr(s, 'expr', None):
-        input_copies=[clone(i_s, dct) for i_s in s.expr.inputs]
-        rval = s.expr.impl(*input_copies)
-        dct[s] = rval
-        return rval
-    return s
-
-
+class Expr(object):
+    """An implementation node in a expression graph.  """
+    def __init__(self, impl, inputs, outputs):
+        self.impl = impl
+        self.inputs = list(inputs)
+        self.outputs = list(outputs)
+        #assert all Inputs and outputs are symbols
+        bad_inputs = [i for i in inputs if not isinstance(i, Symbol)]
+        bad_outputs =[i for i in outputs if not isinstance(i, Symbol)] 
+        assert not bad_inputs, bad_inputs
+        assert not bad_outputs, bad_outputs
+    def __str__(self):
+        return 'Expr{%s}'%str(self.impl)
+    n_inputs = property(lambda self: len(self.inputs))
+    n_outputs = property(lambda self: len(self.outputs))
 
