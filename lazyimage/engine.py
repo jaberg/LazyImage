@@ -18,7 +18,7 @@ class VirtualMachine(object):
             print i,impl
 
     def __call__(self, *args):
-        results = dict(self.closure.store)
+        results = dict(self.closure.values)
         for a, s in zip(args, self.inputs):
             results[s] = a
         def rec_eval(s):
@@ -52,8 +52,19 @@ def function_driver(inputs, outputs, closure, givens, updates,
         raise NotImplementedError('updates arg is not implemented yet')
 
     arg_symbols = [i.clone() for i in inputs]
+
+    #lookup_tbl maps the user's  symbols to the cloned symbols
+    # used in the VirtualMachine
+    # some of the cloned symbols may be optimized away, 
+    # and not be present in the VirtualMachine's program.
     lookup_tbl = dict(zip(inputs, arg_symbols))
     output_symbols = [clone(o, lookup_tbl) for o in outputs]
+
+    #
+    # Bootstrap the meta-data of the cloned inputs according to the restrictions
+    # that have been set in the closure.
+    for orig, cloned in lookup_tbl.iteritems():
+        closure.update_metadata(orig, cloned.meta)
 
     expr_graph = ExprGraph(arg_symbols, output_symbols)
     TP(expr_graph)

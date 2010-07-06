@@ -3,7 +3,7 @@ Sorting and traversing of expression graphs.
 """
 from collections import deque
 
-from .structures import Expr, Symbol
+from .structures import Expr, Symbol, Impl
 
 # Symbol can have multiple exprs during optimization
 class ExprGraph(object):
@@ -24,7 +24,7 @@ class ExprGraph(object):
         Raises an exception if you try to continue iterating after
         modifying the expression graph.
         """
-        exprs = io_expr_list(self.inputs, self.outputs)
+        exprs = [e for e in io_toposort(self.inputs, self.outputs) if isinstance(e,Expr)]
         self._iterating = True
         for e in exprs:
             if self._modified_since_iterating:
@@ -44,6 +44,15 @@ class ExprGraph(object):
         # call pre-hooks
         symbol.impl = new_impl
         # call post-hooks
+
+
+##
+#
+# TODO: Review the following code
+#
+# TODO: optionally use NetworkX for these algorithms
+#
+##
 
 def stack_search(start, expand, mode='bfs', build_inv = False):
     """Search through a graph, either breadth- or depth-first

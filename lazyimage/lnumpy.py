@@ -19,14 +19,12 @@ class NdarraySymbol(Symbol):
     def __rmul__(other, self): return multiply(self, other)
     def __rdiv__(other, self): return divide(self, other)
 
-def numpy_impl(name, n_outputs=1):
-    fn = getattr(numpy, name)
-    return 
-
 class Elemwise(Impl):
     """
     Base for element-wise Implementations
     """
+    def __str__(self):
+        return 'NumPy_%s'%self.name
 
 class NumpyElemwise (Elemwise):
     """

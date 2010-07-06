@@ -59,8 +59,16 @@ assert numpy.allclose(cl_tanh(a1), numpy.tanh(a1))
 # test that the opencl tanh optimization works
 f = function([s], lazy_output )
 f.printprog()
+assert isinstance(list(f.expr_graph.expr_iter())[1].impl, lnumpy_opencl.UnaryElemwiseCpu)
+assert numpy.allclose(f(1), numpy.tanh(5))
+assert numpy.allclose(f(7), numpy.tanh(-1))
 
 # test that the opencl optimization can be disabled
+lnumpy_opencl.replace_numpy_with_opencl.enabled=False
+f = function([s], lazy_output )
+f.printprog()
+assert not isinstance(list(f.expr_graph.expr_iter())[1].impl, lnumpy_opencl.UnaryElemwiseCpu)
+assert numpy.allclose(f(1), numpy.tanh(5))
 
 
 
