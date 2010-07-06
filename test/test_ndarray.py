@@ -1,43 +1,44 @@
 import numpy
-from lazyimage import (lnumpy, compute, function, Symbol, symbol, set_value, get_value,
-    MissingValue)
+from lazyimage import (lnumpy, function, Symbol, symbol, set_value, get_value,
+    MissingValue, get_default_closure)
 import lazyimage
 
+closure = get_default_closure()
+
 NDS = lnumpy.NdarraySymbol
+NDS.new(closure)
+assert len(closure.elements) == 1, closure.elements
 
 print 'nonlazy'
 assert numpy.allclose(lnumpy.tanh(5), numpy.tanh(5)), lnumpy.tanh(5)
 
 print 'lazy'
-assert isinstance(lnumpy.tanh(NDS.blank()), Symbol)
+assert isinstance(lnumpy.tanh(NDS.new(closure)), Symbol)
 
-s = NDS.blank()
+s = NDS.new(closure)
+assert len(closure.elements) == 4, closure.elements
 print 'compute with missing variable'
+r = lnumpy.tanh(s)
+print r.closure.elements
 try:
-    compute(lnumpy.tanh(s))
+    (lnumpy.tanh(s)).compute()
     assert False
-except MissingValue:
-    pass
-
-print 'test you cant set a nonexistant variable'
-try:
-    lazyimage.default_closure.set_value(s,5)
-    assert False
-except KeyError:
-    pass
+except AttributeError,e: #tanh not found in None
+    assert 'tanh' in str(e)
 
 print 'compute tanh'
-lazyimage.default_closure.init_value(s,5)
-assert numpy.allclose(compute(lnumpy.tanh(s)), numpy.tanh(5))
+closure.set_value(s,3)
+print s._value
+assert numpy.allclose((lnumpy.tanh(s)).compute(), numpy.tanh(3))
 
 print 'compute adding'
-assert numpy.allclose(compute(lnumpy.tanh(6 - s)), numpy.tanh(1))
+assert numpy.allclose((lnumpy.tanh(6 - s)).compute(), numpy.tanh(3))
 
 s = symbol(value=5, ctor=NDS.blank)
 lazy_output = lnumpy.tanh(6 - s)
-assert numpy.allclose(compute(lazy_output), numpy.tanh(1))
+assert numpy.allclose((lazy_output).compute(), numpy.tanh(1))
 set_value(s, 8)
-assert numpy.allclose(compute(lazy_output ), numpy.tanh(-2))
+assert numpy.allclose((lazy_output).compute(), numpy.tanh(-2))
 
 f = function([s], lazy_output )
 assert numpy.allclose(f(1), numpy.tanh(5))
