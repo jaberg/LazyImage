@@ -30,7 +30,7 @@ class VirtualMachine(object):
                 raise MissingValue(s)
             #TODO: support multi-output Impls
             vargs = [rec_eval(i) for i in s.expr.inputs]
-            rval = results[s] = s.expr.impl(*vargs)
+            rval = results[s] = s.expr.impl.fn(*vargs)
             return rval
         for s in self.outputs:
             rec_eval(s)
@@ -40,7 +40,7 @@ class VirtualMachine(object):
         else:
             return results[self.outputs[0]]
 
-def function_driver(inputs, outputs, closure, givens, updates, 
+def function_driver(inputs, outputs, closure_cls, givens, updates, 
         VM, TP, return_outputs0):
 
     if givens:
@@ -50,6 +50,10 @@ def function_driver(inputs, outputs, closure, givens, updates,
     if updates:
         #TODO: translate the updates into the cloned graph
         raise NotImplementedError('updates arg is not implemented yet')
+
+    closure = closure_cls()
+    for i in inputs:
+        closure.add_symbol(i.clone(copyvalue=False))
 
     arg_symbols = [i.clone() for i in inputs]
 
@@ -92,14 +96,4 @@ def set_value(s, v, closure=default_closure):
     closure.set_value(s, v)
 def get_value(s, closure=default_closure):
     closure.get_value(s)
-
-def compute(outputs, closure=default_closure, givens=None, VM=None, TP=None):
-    return function(
-            inputs=[], 
-            outputs=outputs,
-            closure=closure,
-            updates=None,
-            givens=None,
-            VM=VM,
-            TP=TP)()
 

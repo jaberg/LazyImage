@@ -3,11 +3,10 @@ A numpy-like module with support for lazy evaluation
 """
 import numpy
 from .structures import Symbol, Impl
-from .engine import compute
 
 class NdarraySymbol(Symbol):
     def __array__(self):
-        return numpy.asarray(compute(self))
+        return numpy.asarray(self.compute())
 
     def __add__(self, other): return add(self, other)
     def __sub__(self, other): return subtract(self, other)
