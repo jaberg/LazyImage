@@ -4,6 +4,7 @@ class TransformHandle(object):
         self.name = name
         self.position=position
         self.tags=tags
+        self.labels = [name] + list(tags)
         self.transform_fn = transform_fn
         self.enabled = True
     def __str__(self):
@@ -30,12 +31,35 @@ class TransformPolicy(object):
         handles.sort()
         return cls([h[1] for h in handles])
 
+    def info(self):
+        print 'TransformPolicy<%i>'%id(self)
+        for i,h in enumerate(self.handles):
+            print ' ',i, h
+
     def __init__(self, handles):
         self.handles = handles
 
-    def __call__(self, expr_graph):
+    def __call__(self, closure):
         for h in self.handles:
-            h.transform(expr_graph)
+            h.transform(closure)
+
+
+@register_transform(0.000, 'default')
+def merge_duplicate_constants(closure, **kwargs):
+    #TODO:
+    pass
+
+@register_transform(0.001, 'default')
+def merge_duplicate_expressions(closure, **kwargs):
+    #TODO:
+    pass
+
+@register_transform(1.0, 'default')
+def infer_types(closure, **kwargs):
+    changed = set()
+    for expr in closure.expr_iter():
+        expr.impl.infer_type(expr, changed)
+
 
 if 0:
     #from .exprgraph import clone, ExprGraph

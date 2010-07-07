@@ -16,6 +16,9 @@ class Type(object):
     might represent.
 
     """
+    @classmethod
+    def new(cls, *args, **kwargs):
+        return cls(*args, **kwargs)
     def __init__(self):
         pass
 
@@ -47,14 +50,6 @@ class Type(object):
         """
         return v0 == v1
 
-    def disjoint_from(self, othertype):
-        """
-        Return True iff no data could be conformant to self and other.
-
-        This function is useful for detecting errors in graph transformations.
-        """
-        return False
-
     def get_clear_value(self):
         return None
 
@@ -76,9 +71,6 @@ class Constant(Type):
         raise TypeError(obj)
     def eq(self, v0, v1, approx=False):
         return v0 is v1
-    def disjoint_from(self, othertype):
-        return not ( getattr(othertype, 'constant', False)\
-                        and othertype.value is self.value)
     def get_clear_value(self):
         return self.value
 
@@ -124,9 +116,8 @@ class Closure(object):
     and whether it should be copied to a private area.
 
     """
-    def __init__(self, allocation_policy):
+    def __init__(self ):
         self.elements = set()
-        self.allocation_policy = allocation_policy
         self.computed = {}
 
     def clone(self, orig_symbol, replacement_table):
@@ -154,6 +145,7 @@ class Closure(object):
             new_symbol = self.add_symbol(orig_symbol.clone(
                 new_closure = self,
                 as_constant=True))
+            print "CONSTANT TYPE", new_symbol.type, new_symbol.type.shape
         return new_symbol
 
     def add_symbol(self, symbol):
@@ -167,31 +159,28 @@ class Closure(object):
         symbol.closure = self
         symbol._computed = False
         return symbol
-    def add_obj(self, obj, constant=True,name=None):
-        symbol = self.add_symbol(self.allocation_policy.as_symbol(self, obj, constant,name))
-        symbol._computed = True
-        return symbol
 
     def get_value(self, symbol):
         if symbol.closure is not self:
             raise ValueError('symbol not in closure', symbol)
-        assert symbol.type.is_conformant(symbol._value)
+        assert symbol.type.is_conformant(symbol._value), str(symbol._value)
         return symbol._value
     def set_value(self, symbol, v):
         if symbol.closure is not self:
             raise ValueError('symbol not in closure', symbol)
         symbol._value = symbol.type.make_conformant(v) 
+        #symbol._computed = True
+        assert symbol.type.is_conformant(symbol._value), str(symbol._value)
     def clear_value(self, symbol):
         if symbol.closure is not self:
             raise ValueError('symbol not in closure', symbol)
         symbol._value = symbol.type.get_clear_value()
+        symbol._computed = False
 
     def compute_value(self, symbol):
         if symbol not in self.elements:
             raise ValueError('Symbol not in this closure')
-        if symbol.expr is None:
-            symbol._computed = True
-        if symbol._computed:
+        if symbol.expr is None or symbol._computed:
             return self.get_value(symbol)
         expr = symbol.expr
         args = [self.compute_value(i) for i in expr.inputs]
@@ -222,22 +211,9 @@ class Closure(object):
         expr.impl = new_impl
         #POST-HOOK
 
-class AllocationPolicy(object):
-    def as_symbol(self, closure, obj, constant=True, name=None):
-        return Symbol(closure=closure,
-                expr=None, 
-                type=Constant(obj) if constant else Type(),
-                value=obj, 
-                name=name)
-
-    def guess_type(obj):
-        """Return the Type [subclass] instance most suitable for `obj`
-        """
-        return [di for di in data_interfaces if di.can_handle(obj)][-1]
-
 class CallableClosure(Closure):
-    def __init__(self, allocation_policy, transform_policy):
-        super(CallableClosure, self).__init__(allocation_policy)
+    def __init__(self, transform_policy):
+        super(CallableClosure, self).__init__()
         self._iterating = False
         self._modified_since_iterating = False
         self.transform_policy = transform_policy
@@ -264,20 +240,28 @@ class CallableClosure(Closure):
         for i,impl in enumerate(self.expr_iter()):
             print i,impl
 
-    def expr_iter(self):
+    def nodes_iter(self, filter_fn):
         """Yield expr nodes in arbitrary order.
 
         Raises an exception if you try to continue iterating after
         modifying the expression graph.
         """
-        exprs = [e for e in exprgraph.io_toposort(self.inputs, self.outputs) if isinstance(e,Expr)]
+        things = [e for e in exprgraph.io_toposort(self.inputs, self.outputs) if filter_fn(e)]
         self._iterating = True
-        for e in exprs:
+        for e in things:
             if self._modified_since_iterating:
                 raise Exception('Modified since iterating')
             yield e
         self._iterating = False
         self._modified_since_iterating = False
+
+    def constant_iter(self):
+        return self.nodes_iter(lambda o: hasattr(o, 'type') and getattr(o.type, 'constant', False))
+    def symbol_iter(self):
+        return self.nodes_iter(lambda o: hasattr(o, 'type'))
+    def expr_iter(self):
+        return self.nodes_iter(lambda o: hasattr(o, 'impl'))
+
     def __call__(self, *args):
         if len(args) != len(self.inputs):
             raise TypeError('Wrong number of inputs')
@@ -293,7 +277,7 @@ class CallableClosure(Closure):
 # The default closure is used by the compute() function to 
 # support lazy evaluation.
 def default_closure_ctor():
-    return CallableClosure(AllocationPolicy(), transform.TransformPolicy.new())
+    return CallableClosure(transform.TransformPolicy.new())
 default_closure = default_closure_ctor()
 
 class Impl(object):
@@ -333,8 +317,8 @@ class Impl(object):
         closure = self.closure_from_args(args)
 
         if closure:
-            inputs = [self.as_input(a) for a in args]
-            outputs = [Symbol.new(closure) for o in range(self.n_outputs)]
+            inputs = [self.as_input(closure, a) for a in args]
+            outputs = self.outputs_from_inputs(inputs)
             expr = self.Expr(inputs, outputs)
             if self.n_outputs>1:
                 return outputs
@@ -343,21 +327,30 @@ class Impl(object):
         else:
             return self.fn(*args)
 
-    def infer_metadata(self, expr):
+    def infer_type(self, expr, changed):
         """
         Update the meta-data of inputs and outputs.
 
         Explicitly mark .meta attributes as being modified by setting
         <symbol>.meta.changed = True
         """
+        pass
 
-    def as_input(self, obj):
+    def as_input(self, closure, obj, constant_type=Constant):
         """Convenience method - it's the default constructor for lazy Impl __call__ methods to
         use to easily turn all inputs into symbols.
         """
         if isinstance(obj, Symbol):
+            if obj.closure is not closure:
+                raise ValueError('Input in foreign closure', obj)
             return obj
-        return self.closure.add_obj(obj, constant=True)
+        rval = closure.add_symbol(Symbol.new(closure, type=constant_type(obj)))
+        closure.set_value(rval, rval.type.value)
+        return  rval
+
+
+    def outputs_from_inputs(self, inputs):
+        outputs = [Symbol.new(closure) for o in range(self.n_outputs)]
 
 class Expr(object):
     """An implementation node in a expression graph.  """

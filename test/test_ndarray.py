@@ -23,7 +23,10 @@ try:
     (lnumpy.tanh(s)).compute()
     assert False
 except AttributeError,e: #tanh not found in None
-    assert 'tanh' in str(e)
+    if 'tanh' in str(e):
+        pass
+    else: 
+        raise
 
 print 'compute tanh'
 closure.set_value(s,3)
@@ -33,13 +36,17 @@ assert numpy.allclose((lnumpy.tanh(s)).compute(), numpy.tanh(3))
 print 'compute adding'
 assert numpy.allclose((lnumpy.tanh(6 - s)).compute(), numpy.tanh(3))
 
+print "TESTING NEW STUFF"
 print 'testing the same expression on multiple values'
 s = NDS.new(closure, value=5)
+s.type.shape=() #promise to always pass a scalar here
 lazy_output = lnumpy.tanh(6 - s)
 assert numpy.allclose((lazy_output).compute(), numpy.tanh(1))
 closure.set_value(s, 8)
-assert numpy.allclose((lazy_output).compute(), numpy.tanh(-2))
+computed = (lazy_output).compute()
+assert numpy.allclose(computed, numpy.tanh(-2)), computed
 
+print 'CALLING FUNCTION'
 f = function([s], lazy_output )
 assert numpy.allclose(f(1), numpy.tanh(5))
 assert numpy.allclose(f(3), numpy.tanh(3))
