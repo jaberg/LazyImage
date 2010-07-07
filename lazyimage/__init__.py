@@ -1,11 +1,8 @@
 import structures, transform, engine
 
-from structures import Type, Symbol, Closure, Impl, Expr
+from structures import Type, Symbol, Closure, Impl, Expr, function
 
 from transform import register_transform, transform_db
-
-from engine import (function, symbol, get_value, set_value, MissingValue)
-
 
 def set_default_closure(dc):
     structures.default_closure = dc

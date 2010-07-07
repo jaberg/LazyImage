@@ -36,3 +36,45 @@ class TransformPolicy(object):
     def __call__(self, expr_graph):
         for h in self.handles:
             h.transform(expr_graph)
+
+if 0:
+    #from .exprgraph import clone, ExprGraph
+    #from .transform import TransformPolicy
+
+    class MissingValue(Exception):pass
+
+    class VirtualMachine(object):
+        def __init__(self, inputs, outputs, closure, expr_graph, updates, return_outputs0):
+            self.inputs = inputs
+            self.outputs = outputs
+            self.closure = closure
+            self.updates = updates
+            self.return_outputs0 = return_outputs0
+            self.expr_graph = expr_graph
+
+        def printprog(self):
+            for i,impl in enumerate(self.expr_graph.expr_iter()):
+                print i,impl
+
+        def __call__(self, *args):
+            results = dict(self.closure.values)
+            for a, s in zip(args, self.inputs):
+                results[s] = a
+            def rec_eval(s):
+                try:
+                    return results[s]
+                except KeyError:
+                    pass
+                if not s.expr:
+                    raise MissingValue(s)
+                #TODO: support multi-output Impls
+                vargs = [rec_eval(i) for i in s.expr.inputs]
+                rval = results[s] = s.expr.impl.fn(*vargs)
+                return rval
+            for s in self.outputs:
+                rec_eval(s)
+            #TODO: support multiple outputs
+            if self.return_outputs0:
+                return [results[o] for o in self.outputs]
+            else:
+                return results[self.outputs[0]]

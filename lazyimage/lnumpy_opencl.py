@@ -1,10 +1,9 @@
 
 import numpy
-from .structures import Symbol, Impl
+from .structures import Symbol, Impl, CallableClosure
 from . import lnumpy, transform
 
 import pyopencl as cl
-
 
 #
 # TODO: How to handle contexts?   Some ideas:
@@ -15,7 +14,6 @@ import pyopencl as cl
 
 _cpu_context = cl.Context(dev_type=cl.device_type.CPU)
 _cpu_queue   = cl.CommandQueue(_cpu_context)
-
 
 def register_transform(priority, tags=None):
     if tags is None:

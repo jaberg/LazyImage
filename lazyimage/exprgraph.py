@@ -3,49 +3,6 @@ Sorting and traversing of expression graphs.
 """
 from collections import deque
 
-from .structures import Expr, Symbol, Impl
-
-# Symbol can have multiple exprs during optimization
-class ExprGraph(object):
-    """
-    Object to permit event-driven programming during expression graph transformation.
-    """
-    def __init__(self, inputs, outputs):
-        self.inputs = inputs
-        self.outputs = outputs
-        self._iterating = False
-        self._modified_since_iterating = False
-
-        all_symbols = io_toposort(inputs, outputs)
-
-    def expr_iter(self):
-        """Yield expr nodes in arbitrary order.
-
-        Raises an exception if you try to continue iterating after
-        modifying the expression graph.
-        """
-        exprs = [e for e in io_toposort(self.inputs, self.outputs) if isinstance(e,Expr)]
-        self._iterating = True
-        for e in exprs:
-            if self._modified_since_iterating:
-                raise Exception('Modified since iterating')
-            yield e
-        self._iterating = False
-        self._modified_since_iterating = False
-
-    def replace_symbol(self, current_symbol, new_symbol):
-        # call pre-hooks
-        raise NotImplementedError()
-        if self._iterating:
-            self._modified_since_iterating = True
-        # call post-hooks
-
-    def replace_impl(self, symbol, new_impl):
-        # call pre-hooks
-        symbol.impl = new_impl
-        # call post-hooks
-
-
 ##
 #
 # TODO: Review the following code

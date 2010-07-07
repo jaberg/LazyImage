@@ -1,6 +1,5 @@
 import numpy
-from lazyimage import (lnumpy, function, Symbol, symbol, set_value, get_value,
-    MissingValue, get_default_closure)
+from lazyimage import (lnumpy, function, Symbol, get_default_closure)
 import lazyimage
 
 closure = get_default_closure()
@@ -34,10 +33,11 @@ assert numpy.allclose((lnumpy.tanh(s)).compute(), numpy.tanh(3))
 print 'compute adding'
 assert numpy.allclose((lnumpy.tanh(6 - s)).compute(), numpy.tanh(3))
 
-s = symbol(value=5, ctor=NDS.blank)
+print 'testing the same expression on multiple values'
+s = NDS.new(closure, value=5)
 lazy_output = lnumpy.tanh(6 - s)
 assert numpy.allclose((lazy_output).compute(), numpy.tanh(1))
-set_value(s, 8)
+closure.set_value(s, 8)
 assert numpy.allclose((lazy_output).compute(), numpy.tanh(-2))
 
 f = function([s], lazy_output )
@@ -60,7 +60,7 @@ assert numpy.allclose(cl_tanh(a1), numpy.tanh(a1))
 # test that the opencl tanh optimization works
 f = function([s], lazy_output )
 f.printprog()
-assert isinstance(list(f.expr_graph.expr_iter())[1].impl, lnumpy_opencl.UnaryElemwiseCpu)
+assert isinstance(list(f.expr_iter())[1].impl, lnumpy_opencl.UnaryElemwiseCpu)
 assert numpy.allclose(f(1), numpy.tanh(5))
 assert numpy.allclose(f(7), numpy.tanh(-1))
 
@@ -68,7 +68,7 @@ assert numpy.allclose(f(7), numpy.tanh(-1))
 lnumpy_opencl.replace_numpy_with_opencl.enabled=False
 f = function([s], lazy_output )
 f.printprog()
-assert not isinstance(list(f.expr_graph.expr_iter())[1].impl, lnumpy_opencl.UnaryElemwiseCpu)
+assert not isinstance(list(f.expr_iter())[1].impl, lnumpy_opencl.UnaryElemwiseCpu)
 assert numpy.allclose(f(1), numpy.tanh(5))
 
 

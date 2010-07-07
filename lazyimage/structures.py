@@ -4,6 +4,9 @@ Data structures to support lazy-evaluation decorators.
 """
 import copy
 
+import exprgraph
+import transform
+
 class Type(object):
     """
     Class to represent a set of possible data values.
@@ -58,7 +61,6 @@ class Type(object):
     def as_constant(self, value):
         return Constant(value)
 
-
 class Constant(Type):
     def __init__(self, value):
         super(Constant, self).__init__()
@@ -96,16 +98,17 @@ class Symbol(object):
         self.type = type
         self._value = value
         self.name = name
-
         self._value_version = 0 # changing self._value increments this
 
-    def clone(self, as_constant=False ):
-        newvalue = self.type.get_clear_value()
+    def clone(self, new_closure, as_constant=False ):
         if as_constant:
-            type = self.type.as_constant()
+            newvalue = self._value # TODO: Copy here?
+            type = self.type.as_constant(self._value)
         else:
+            newvalue = self.type.get_clear_value()
             type = copy.deepcopy(self.type)
         return self.__class__(
+                closure=new_closure,
                 expr=None, 
                 type=type,
                 value=newvalue,
@@ -113,7 +116,7 @@ class Symbol(object):
 
     def compute(self):
         return self.closure.compute_value(self)
-
+exprgraph.Symbol=Symbol
 class Closure(object):
     """A closure encapsulates a set of symbols that can be connected by Expressions and lazy evaluation
 
@@ -139,7 +142,7 @@ class Closure(object):
             input_clones=[self.clone(i_s, replacement_table) 
                     for i_s in orig_symbol.expr.inputs]
             if orig_symbol.expr.n_outputs == 1:
-                rval = orig_symbol.expr.impl(*input_copies)
+                rval = orig_symbol.expr.impl(*input_clones)
                 replacement_table[orig_symbol] = rval
             else:
                 rval = orig_symbol.expr.impl(*input_copies)
@@ -148,8 +151,9 @@ class Closure(object):
             return replacement_table[orig_symbol]
         else:
             # this is a leaf node, so we make it a constant
-            new_symbol = self.add_obj(orig_symbol.clone(as_constant=True))
-            print 'CLONED VALUE', new_symbol._value
+            new_symbol = self.add_symbol(orig_symbol.clone(
+                new_closure = self,
+                as_constant=True))
         return new_symbol
 
     def add_symbol(self, symbol):
@@ -157,18 +161,16 @@ class Closure(object):
         """
         if not isinstance(symbol, Symbol):
             raise TypeError(symbol)
-        if symbol.closure is self:
-            assert symbol in self.elements
-            return symbol
-        if symbol.closure:
+        if symbol.closure and symbol.closure is not self:
             raise ValueError('symbol already has closure', symbol.closure)
-        symbol.closure = self
         self.elements.add(symbol)
+        symbol.closure = self
         symbol._computed = False
         return symbol
     def add_obj(self, obj, constant=True,name=None):
-        symbol = self.allocation_policy.as_symbol(self, obj, constant,name)
-        return self.add_symbol(symbol)
+        symbol = self.add_symbol(self.allocation_policy.as_symbol(self, obj, constant,name))
+        symbol._computed = True
+        return symbol
 
     def get_value(self, symbol):
         if symbol.closure is not self:
@@ -200,12 +202,25 @@ class Closure(object):
         else:
             # symbol must be the only output of expr
             self.set_value(symbol, results)
-        return self.get_value(symbol)
+        rval =self.get_value(symbol)
+        return rval
+
+    def compute_values(self, symbols):
+        return [self.compute_value(s) for s in symbols]
 
     def clear_values(self):
         """ Clear the values of all non-constant Symbols in the Closure """
         for symbol in self.elements:
             self.clear_value(symbol)
+
+    def change_input(self, expr, position, new_symbol):
+        #PRE-HOOK
+        raise NotImplementedError()
+        #POST-HOOK
+    def replace_impl(self, expr, new_impl):
+        #PRE-HOOK
+        expr.impl = new_impl
+        #POST-HOOK
 
 class AllocationPolicy(object):
     def as_symbol(self, closure, obj, constant=True, name=None):
@@ -220,12 +235,66 @@ class AllocationPolicy(object):
         """
         return [di for di in data_interfaces if di.can_handle(obj)][-1]
 
+class CallableClosure(Closure):
+    def __init__(self, allocation_policy, transform_policy):
+        super(CallableClosure, self).__init__(allocation_policy)
+        self._iterating = False
+        self._modified_since_iterating = False
+        self.transform_policy = transform_policy
+
+        #TODO: install a change_input post-hook to set modified_since_iterating to True
+        # call pre-hooks
+        if self._iterating:
+            self._modified_since_iterating = True
+        # call post-hooks
+
+    def set_io(self, inputs, outputs, updates, unpack_single_output):
+        if updates:
+            #TODO: translate the updates into the cloned graph
+            raise NotImplementedError('updates arg is not implemented yet')
+        for o in inputs+outputs:
+            if o.closure is not self:
+                raise ValueError('output not in closure', o)
+        self.inputs = inputs
+        self.outputs = outputs
+        self.unpack = unpack_single_output and len(outputs)==1
+        self.transform_policy(self)
+
+    def printprog(self):
+        for i,impl in enumerate(self.expr_iter()):
+            print i,impl
+
+    def expr_iter(self):
+        """Yield expr nodes in arbitrary order.
+
+        Raises an exception if you try to continue iterating after
+        modifying the expression graph.
+        """
+        exprs = [e for e in exprgraph.io_toposort(self.inputs, self.outputs) if isinstance(e,Expr)]
+        self._iterating = True
+        for e in exprs:
+            if self._modified_since_iterating:
+                raise Exception('Modified since iterating')
+            yield e
+        self._iterating = False
+        self._modified_since_iterating = False
+    def __call__(self, *args):
+        if len(args) != len(self.inputs):
+            raise TypeError('Wrong number of inputs')
+        for i, a in zip(self.inputs, args):
+            self.set_value(i,a)
+        if self.unpack:
+            return self.compute_value(self.outputs[0])
+        else:
+            return self.compute_values(self.outputs)
 
 # The default closure is a database of values to use for symbols
 # that are not given as function arguments.
 # The default closure is used by the compute() function to 
 # support lazy evaluation.
-default_closure = Closure(AllocationPolicy())
+def default_closure_ctor():
+    return CallableClosure(AllocationPolicy(), transform.TransformPolicy.new())
+default_closure = default_closure_ctor()
 
 class Impl(object):
     """
@@ -290,7 +359,6 @@ class Impl(object):
             return obj
         return self.closure.add_obj(obj, constant=True)
 
-
 class Expr(object):
     """An implementation node in a expression graph.  """
     def __init__(self, impl, inputs, outputs):
@@ -306,4 +374,28 @@ class Expr(object):
         return 'Expr{%s}'%str(self.impl)
     n_inputs = property(lambda self: len(self.inputs))
     n_outputs = property(lambda self: len(self.outputs))
+exprgraph.Expr=Expr
+
+def function(inputs, outputs, closure_ctor=default_closure_ctor,
+        givens=None, updates=None):
+    if isinstance(outputs, Symbol):
+        outputs = [outputs]
+        return_outputs0 = True
+    else:
+        return_outputs0 = False
+
+    if givens:
+        #TODO: use the givens to modify the clone operation
+        raise NotImplementedError('givens arg is not implemented yet')
+    if updates:
+        #TODO: clone the updates
+        raise NotImplementedError('updates arg is not implemented yet')
+
+    closure = closure_ctor()
+
+    cloned_inputs = [closure.add_symbol(i.clone(closure,as_constant=False)) for i in inputs]
+    replacements = dict(zip(inputs, cloned_inputs))
+    cloned_outputs = [closure.clone(o, replacements) for o in outputs]
+    closure.set_io(cloned_inputs, cloned_outputs, updates, return_outputs0)
+    return closure
 
